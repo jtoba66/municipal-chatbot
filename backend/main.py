@@ -57,7 +57,7 @@ load_dotenv()
 
 # ==================== French Translation Support ====================
 
-# Simple language detection based on common French words
+# Language detection indicators
 FRENCH_INDICATORS = [
     'bonjour', 'merci', 's\'il vous plaît', 'excusez', 'je', 'vous', 'nous',
     'les', 'des', 'une', 'pour', 'dans', 'avec', 'sur', 'cette', 'ce',
@@ -66,23 +66,48 @@ FRENCH_INDICATORS = [
     'après-midi', 'aujourd\'hui', 'demain', 'problème', 'aide', 'renseignements'
 ]
 
+KOREAN_INDICATORS = [
+    '안녕하세요', '감사합니다', '부탁합니다', '어떻게', '무엇', '언제', '어디',
+    '수거', '쓰레기', '재활용', '음식물', '주차', '티켓', '위치', '도와주세요',
+    '알려주세요', '검색', '정보', '요금', '시간', '날짜', '주소'
+]
+
+CHINESE_INDICATORS = [
+    '你好', '谢谢', '请', '什么', '哪里', '什么时候', '怎么',
+    '垃圾', '回收', '停车', '票', '位置', '帮助', '查询',
+    '信息', '费用', '时间', '日期', '地址', '今天', '明天'
+]
+
 # In-memory session language preferences
-# Format: {session_id: "fr" | "en"}
+# Format: {session_id: "fr" | "en" | "ko" | "zh"}
 session_language_preference = {}
 
 
 def detect_language(message: str) -> str:
     """
-    Detect if message is primarily French or English.
-    Returns: "fr" for French, "en" for English
+    Detect if message is primarily French, Korean, Chinese, or English.
+    Returns: "fr" for French, "ko" for Korean, "zh" for Chinese, "en" for English
     """
+    import re
     message_lower = message.lower()
     
-    # Count French indicators
-    french_count = sum(1 for word in FRENCH_INDICATORS if word in message_lower)
+    # Check for Korean characters (Hangul) - Unicode range: \uAC00-\uD7A3
+    if any('\uac00' <= c <= '\ud7a3' for c in message):
+        return "ko"
     
-    # If more than 2 French indicators, likely French
-    if french_count >= 2:
+    # Check for Chinese characters (Han) - Unicode range: \u4E00-\u9FFF
+    if any('\u4e00' <= c <= '\u9fff' for c in message):
+        return "zh"
+    
+    # Check for French indicators using word boundary matching
+    french_count = sum(1 for word in FRENCH_INDICATORS if re.search(r'\b' + re.escape(word) + r'\b', message_lower))
+    
+    # If at least 1 French indicator with word boundary, likely French
+    # Also check for French-specific accents
+    french_accents = ['é', 'è', 'ê', 'ë', 'à', 'â', 'ô', 'ù', 'û', 'ç']
+    has_french_accents = any(acc in message for acc in french_accents)
+    
+    if french_count >= 1 or has_french_accents:
         return "fr"
     
     # Also check for French-specific punctuation and patterns
@@ -97,6 +122,19 @@ def detect_language(message: str) -> str:
     # Check for French question marks and accents in words
     if '?' in message and french_count >= 1:
         return "fr"
+    
+    # Check for Korean indicators in Latin transliteration (use word boundaries)
+    korean_transliteration = ['annyeonghaseyo', 'gamsahamnida', 'anyo', 
+                              'anja', 'geugeos', 'eodi', 'eoneu']
+    # Remove 'ye' and 'ne' as they are too short and cause false positives
+    if any(re.search(r'\b' + re.escape(word) + r'\b', message_lower) for word in korean_transliteration):
+        return "ko"
+    
+    # Check for Chinese pinyin indicators (use word boundaries)
+    chinese_pinyin = ['nihao', 'xiexie', 'jintian', 'mingtian', 'didian', 'zhidao']
+    # Remove 'zenme', 'shenme', 'zai na', 'qing wen' as they have spaces/too short
+    if any(re.search(r'\b' + re.escape(word) + r'\b', message_lower) for word in chinese_pinyin):
+        return "zh"
     
     return "en"
 
@@ -153,12 +191,82 @@ French translation:"""
         return text
 
 
+def translate_to_korean(text: str) -> str:
+    """
+    Translate English text to Korean using the LLM.
+    """
+    llm_model = get_llm()
+    
+    prompt = f"""Translate the following text to Korean. 
+Only provide the translation, no explanations or additional text.
+
+Text to translate:
+{text}
+
+Korean translation:"""
+    
+    try:
+        response = llm_model.invoke(prompt)
+        translation = response.content if hasattr(response, 'content') else str(response)
+        
+        # Clean up the response
+        translation = translation.strip()
+        
+        # If the LLM added extra text, try to extract just the translation
+        if '\n' in translation:
+            lines = [line.strip() for line in translation.split('\n') if line.strip()]
+            if lines:
+                translation = lines[0]
+        
+        return translation
+    except Exception as e:
+        print(f"Korean translation error: {e}")
+        return text
+
+
+def translate_to_chinese(text: str) -> str:
+    """
+    Translate English text to Simplified Chinese using the LLM.
+    """
+    llm_model = get_llm()
+    
+    prompt = f"""Translate the following text to Simplified Chinese. 
+Only provide the translation, no explanations or additional text.
+
+Text to translate:
+{text}
+
+Chinese translation:"""
+    
+    try:
+        response = llm_model.invoke(prompt)
+        translation = response.content if hasattr(response, 'content') else str(response)
+        
+        # Clean up the response
+        translation = translation.strip()
+        
+        # If the LLM added extra text, try to extract just the translation
+        if '\n' in translation:
+            lines = [line.strip() for line in translation.split('\n') if line.strip()]
+            if lines:
+                translation = lines[0]
+        
+        return translation
+    except Exception as e:
+        print(f"Chinese translation error: {e}")
+        return text
+
+
 def translate_response(text: str, target_language: str) -> str:
     """
     Translate response to target language if needed.
     """
     if target_language == "fr":
         return translate_to_french(text)
+    elif target_language == "ko":
+        return translate_to_korean(text)
+    elif target_language == "zh":
+        return translate_to_chinese(text)
     return text
 
 app = FastAPI(title="Municipal Chatbot API", version="1.0.0")
@@ -2052,6 +2160,10 @@ async def chat(request: ChatRequest):
     elif "in english" in message_lower or "respond in english" in message_lower or "en anglais" in message_lower:
         # User wants English
         set_language_preference(session_id, "en")
+    elif any(word in message_lower for word in ['korean', 'korea', '한국어', '한국']):
+        set_language_preference(session_id, "ko")
+    elif any(word in message_lower for word in ['chinese', '中文', 'china', 'chinese']):
+        set_language_preference(session_id, "zh")
     
     # Detect language of the current message
     detected_language = detect_language(request.message)
@@ -2060,13 +2172,14 @@ async def chat(request: ChatRequest):
     target_language = get_language_preference(session_id)
     # If no preference set, use detected language
     if target_language == "en":  # Default, no preference saved
-        # Use detected language
-        if detected_language == "fr":
-            target_language = "fr"
+        # Use detected language (if not English)
+        if detected_language in ["fr", "ko", "zh"]:
+            target_language = detected_language
     
     # ====== LLM-Based Intent Classification ======
     # Use the appropriate language for intent classification
-    intent_prompt_lang = "in French" if target_language == "fr" else "in English"
+    intent_prompt_lang_map = {"fr": "in French", "ko": "in Korean", "zh": "in Chinese", "en": "in English"}
+    intent_prompt_lang = intent_prompt_lang_map.get(target_language, "in English")
     intent_result = classify_intent(request.message, session_id)
     intent = intent_result.get("intent", "general_query")
     entities = intent_result.get("entities", {})
@@ -2081,9 +2194,9 @@ async def chat(request: ChatRequest):
         ticket_number = entities.get("ticket_number") or extract_ticket_number(request.message)
         answer = get_ticket_response(ticket_number)
         
-        # Translate if user prefers French
-        if target_language == "fr":
-            answer = translate_response(answer, "fr")
+        # Translate if user prefers non-English
+        if target_language != "en":
+            answer = translate_response(answer, target_language)
         
         try:
             database.add_message(session_id, "user", request.message)
@@ -2133,9 +2246,9 @@ async def chat(request: ChatRequest):
             answer = ("I'd be happy to look up your garbage collection day! "
                      "What's your address? (e.g., '110 Fergus Ave')")
         
-        # Translate if user prefers French
-        if target_language == "fr":
-            answer = translate_response(answer, "fr")
+        # Translate if user prefers non-English
+        if target_language != "en":
+            answer = translate_response(answer, target_language)
         
         try:
             database.add_message(session_id, "user", request.message)
@@ -2158,9 +2271,9 @@ async def chat(request: ChatRequest):
         facility_type = entities.get("facility_type") or extract_facility_type(request.message)
         answer = get_location_response(facility_type)
         
-        # Translate if user prefers French
-        if target_language == "fr":
-            answer = translate_response(answer, "fr")
+        # Translate if user prefers non-English
+        if target_language != "en":
+            answer = translate_response(answer, target_language)
         
         try:
             database.add_message(session_id, "user", request.message)
@@ -2417,9 +2530,9 @@ async def chat(request: ChatRequest):
         
         answer = get_property_tax_response(known_address)
         
-        # Translate if user prefers French
-        if target_language == "fr":
-            answer = translate_response(answer, "fr")
+        # Translate if user prefers non-English
+        if target_language != "en":
+            answer = translate_response(answer, target_language)
         
         try:
             database.add_message(session_id, "user", request.message)
@@ -2488,9 +2601,9 @@ Answer:"""
     except Exception as e:
         raise HTTPException(500, f"Error generating response: {str(e)}")
     
-    # Translate if user prefers French
-    if target_language == "fr":
-        answer = translate_response(answer, "fr")
+    # Translate if user prefers non-English
+    if target_language != "en":
+        answer = translate_response(answer, target_language)
     
     # Save user message to database if session exists
     try:

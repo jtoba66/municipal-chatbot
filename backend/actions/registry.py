@@ -171,7 +171,7 @@ ACTION_SCHEMAS: Dict[str, ActionSchema] = {
         ],
         optional_fields=[],
         portal_url="https://kitchener.parkingpermit.site/signup",
-        execution_type="automation",
+        execution_type="deep_link",
         automation_script="kitchener/book_parking_permit.py"
     ),
     "check_permit_status": ActionSchema(

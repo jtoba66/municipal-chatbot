@@ -44,17 +44,9 @@ nohup.out
 *.sqlite3
 chroma_db/
 data/knowledge_base/
-# Keep data/documents - this is the knowledge base!
-
-# Internal working files (not for public repo)
-*test*.md
-*review*.md
-*verification*.md
-lead-research.md
-portal-research.md
-viability.md
-TICKETS.md
-PLANNED-ENHANCEMENTS.md
+data/documents/*.txt
+data/documents/*.md
+!data/documents/README.md
 
 # API Keys (keep example)
 .env.example

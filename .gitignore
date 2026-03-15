@@ -46,4 +46,4 @@ chroma_db/
 data/knowledge_base/
 
 # API Keys (keep example)
-.env.example
+.env.example.env

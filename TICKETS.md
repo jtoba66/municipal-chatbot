@@ -149,11 +149,12 @@
   - When querying /chat endpoint
   - Then Ollama (not OpenAI) generates the response
 
-### [TICKET-012] Set Up PostgreSQL with Docker
+### [TICKET-012] Set Up PostgreSQL with Docker (SUPERSEDED)
 - **Story**: As the system, I need persistent storage for conversations and knowledge base.
 - **Priority**: P0
 - **Effort**: M
 - **Label**: backend, devops
+- **Note**: Superseded by TICKET-019 (SQLite) for MVP. Can revisit PostgreSQL for production scale later.
 - **Acceptance Criteria**:
   - Given Docker is installed
   - When running docker-compose up
@@ -203,6 +204,111 @@
   - When all services are operational
   - Then status shows "ok" with ollama, db, and kb status
 
+### [TICKET-017] Session User Capture
+- **Story**: As a citizen, I want to provide my name and email before chatting so I can receive conversation summaries and the session persists across page refreshes.
+- **Priority**: P1
+- **Effort**: M
+- **Label**: frontend, backend
+- **Dependencies**: TICKET-002
+- **Acceptance Criteria**:
+  - Given a user opens the chat widget
+  - When they haven't provided info yet
+  - Then a prompt appears asking for Name and Email (optional)
+  - Given user provides name and optional email
+  - When the session is stored
+  - Then the data persists in SQLite sessions table and localStorage
+  - Given user refreshes the page
+  - When they open the chat again
+  - Then their info is restored from localStorage
+
+### [TICKET-018] Email Conversation Summary
+- **Story**: As a citizen, I want to receive an email summary of my chat session so I can reference the information later.
+- **Priority**: P1
+- **Effort**: M
+- **Label**: backend
+- **Dependencies**: TICKET-017, TICKET-006
+- **Acceptance Criteria**:
+  - Given a user has provided their email
+  - When they click "End Chat" or after 15 minutes of inactivity
+  - Then a summary email is sent via SMTP
+  - Given the email is generated
+  - When it includes the date, questions asked, and answers given
+  - Then the email is delivered to the user's provided address
+
+### [TICKET-019] Replace PostgreSQL with SQLite
+- **Story**: As the system, I need a simpler database solution for MVP so we can reduce infrastructure complexity.
+- **Priority**: P1
+- **Effort**: S
+- **Label**: backend, devops
+- **Dependencies**: None (replaces TICKET-012)
+- **Acceptance Criteria**:
+  - Given Docker is configured
+  - When running docker-compose up
+  - Then SQLite database is created with schema: sessions, messages, knowledge_base
+  - Given the migration is complete
+  - When the app runs
+  - Then all existing functionality works with SQLite
+  - Note: PostgreSQL migration can be done later for production scale
+
+### [TICKET-020] Data Scraping & Refresh Schedule
+- **Story**: As the system, I need automated content updates so the chatbot has current municipal information.
+- **Priority**: P1
+- **Effort**: M
+- **Label**: backend, devops
+- **Dependencies**: TICKET-003 (RAG Pipeline)
+- **Acceptance Criteria**:
+  - **Daily Scrape** (light): Given cron runs at 6 AM daily
+    - When scraping news, road closures, alerts, and events
+    - Then content is updated in the knowledge base
+  - **Weekly Scrape**: Given cron runs every Sunday at 2 AM
+    - When scraping garbage schedules, parking rules, construction updates
+    - Then full weekly content is refreshed
+  - **Monthly Scrape**: Given cron runs on 1st of each month
+    - When scraping bylaws, permit fees, contact info
+    - Then full rebuild of static content is performed
+  - Given a scrape script runs
+  - When errors occur
+  - Then alerts are sent to admin email and logs are preserved
+
+**Implementation**:
+- Separate scripts: `scrape_daily.sh`, `scrape_weekly.sh`, `scrape_monthly.sh`
+- Cron-based automation via systemd timers or crontab
+- Optional: sitemap.xml change detection to skip unnecessary scrapes
+
+### [TICKET-021] Ticket Status & Payment Lookup
+- **Story**: As a citizen, I want to look up my ticket status and make payments so I can manage my municipal violations easily.
+- **Priority**: P1
+- **Effort**: M
+- **Label**: backend, frontend
+- **Dependencies**: TICKET-004 (Connect Chat Widget to Backend API)
+- **Acceptance Criteria**:
+  - Given a user provides a ticket number (6-8 digits)
+  - When querying the ticket status endpoint
+  - Then return: ticket status (open/paid/pending), amount owed, due date, violation description
+  - Given a user asks for a payment link
+  - When the ticket exists and is payable
+  - Then return the payment URL ( City's secure payment portal)
+  - Given an invalid ticket number is entered
+  - When the lookup is performed
+  - Then return a friendly error message suggesting they check the number
+
+### [TICKET-022] Location Finder
+- **Story**: As a citizen, I want to find the nearest municipal location so I can drop off items, get services, or find hours of operation.
+- **Priority**: P1
+- **Effort**: M
+- **Label**: backend, frontend
+- **Dependencies**: TICKET-004 (Connect Chat Widget to Backend API)
+- **Acceptance Criteria**:
+  - Given a user asks "Where is the nearest...?" or "Where can I drop off..."
+  - When querying location types: recycling depot, landfill, City Hall, community centres, parks, libraries
+  - Then return: location name, address, hours of operation, directions/link to map
+  - Given pre-loaded location data
+  - When the RAG pipeline runs
+  - Then locations are indexed with: name, address, coordinates, hours, services offered, phone number
+  - Given a user asks about a location not in the database
+  - When the lookup fails
+  - Then suggest the closest match or provide a link to the city's location directory
+
 ---
 
 ## 📋 Ticket Summary
@@ -225,6 +331,12 @@
 | TICKET-014 | Create Admin Authentication | P1 | S | backend |
 | TICKET-015 | Build Embeddable Widget Loader | P0 | S | frontend |
 | TICKET-016 | Add Health Check with Ollama Status | P1 | S | backend |
+| TICKET-017 | Session User Capture | P1 | M | frontend, backend |
+| TICKET-018 | Email Conversation Summary | P1 | M | backend |
+| TICKET-019 | Replace PostgreSQL with SQLite | P1 | S | backend, devops |
+| TICKET-020 | Data Scraping & Refresh Schedule | P1 | M | backend, devops |
+| TICKET-021 | Ticket Status & Payment Lookup | P1 | M | backend, frontend |
+| TICKET-022 | Location Finder | P1 | M | backend, frontend |
 
 ---
 

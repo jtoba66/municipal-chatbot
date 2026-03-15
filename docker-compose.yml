@@ -58,7 +58,7 @@ services:
       - DATABASE_URL=postgresql://chatbot:${DB_PASSWORD:-change_me_in_production}@postgres:5432/municipal_chatbot
       - OLLAMA_BASE_URL=http://ollama:11434
       - OLLAMA_MODEL=llama3.2
-      - CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+      - CORS_ORIGINS=*
     ports:
       - "8000:8000"
     depends_on:

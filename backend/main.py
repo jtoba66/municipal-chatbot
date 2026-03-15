@@ -42,6 +42,16 @@ from langchain_community.llms import HuggingFaceHub
 import database
 import email_service
 
+# Agentic Actions imports
+from actions import ACTION_REGISTRY, get_action_schema, get_all_actions
+from actions import FieldCollector, action_state_manager
+from actions.intent_detector import (
+    IntentClassificationRequest, 
+    IntentClassificationResponse,
+    classify_intent_with_llm,
+    classify_intent_simple
+)
+
 # Load environment
 load_dotenv()
 
@@ -172,7 +182,7 @@ DOCS_DIR = DATA_DIR / "documents"
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 # OpenRouter configuration (for LLM)
-OPENROUTER_API_KEY = os.getenv("OPENAI_API_KEY", "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")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_BASE_URL = os.getenv("OPENAI_API_BASE", "https://openrouter.ai/api/v1")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
 
@@ -1703,6 +1713,233 @@ async def delete_session_language(session_id: str):
         return {"status": "cleared", "session_id": session_id}
     except Exception as e:
         raise HTTPException(500, f"Error clearing language: {str(e)}")
+
+
+# ==================== Agentic Actions ====================
+
+class ActionStartRequest(BaseModel):
+    session_id: str
+    action: str
+    city: str = "kitchener"
+    initial_fields: dict = {}
+
+
+class ActionStartResponse(BaseModel):
+    status: str
+    session_id: str
+    action: str
+    required_fields: List[str]
+    missing_fields: List[str]
+    prompt: str
+    state: str
+
+
+class ActionCollectRequest(BaseModel):
+    session_id: str
+    message: str  # User's response containing field values
+
+
+class ActionCollectResponse(BaseModel):
+    status: str
+    session_id: str
+    action: str
+    collected_fields: dict
+    missing_fields: List[str]
+    prompt: str
+    is_complete: bool
+    state: str
+
+
+class ActionConfirmRequest(BaseModel):
+    session_id: str
+    confirmed: bool  # True = proceed, False = cancel
+
+
+class ActionConfirmResponse(BaseModel):
+    status: str
+    message: str
+    ready_to_execute: bool = False
+    action: str = None
+    fields: dict = {}
+
+
+class ActionStatusResponse(BaseModel):
+    status: str
+    session_id: str
+    action: str
+    state: str
+    collected_fields: dict
+    missing_fields: List[str]
+
+
+# Initialize field collector
+field_collector = FieldCollector(action_state_manager)
+
+
+@app.post("/api/intent/classify", response_model=IntentClassificationResponse)
+async def classify_intent_endpoint(request: IntentClassificationRequest):
+    """
+    Classify user message intent.
+    
+    Classifies as:
+    - QUESTION: User wants information
+    - ACTION_REQUEST: User wants to perform an action
+    - GREETING: User is saying hello
+    
+    For ACTION_REQUEST, also extracts action_type and any provided fields.
+    """
+    try:
+        # Try LLM-based classification first
+        llm = get_llm()
+        if llm:
+            result = classify_intent_with_llm(request.message, llm)
+            return result
+        else:
+            # Fallback to simple classification
+            return classify_intent_simple(request.message)
+    except Exception as e:
+        print(f"Intent classification error: {e}")
+        # Fallback to simple
+        return classify_intent_simple(request.message)
+
+
+@app.get("/api/actions", response_model=dict)
+async def list_actions():
+    """Get list of all available actions"""
+    return {
+        "actions": get_all_actions(),
+        "schemas": {
+            action: get_action_schema(action).model_dump() 
+            for action in get_all_actions()
+        }
+    }
+
+
+@app.get("/api/actions/{action}/schema", response_model=dict)
+async def get_action_schema_endpoint(action: str):
+    """Get the field schema for a specific action"""
+    schema = get_action_schema(action)
+    if not schema:
+        raise HTTPException(404, f"Action '{action}' not found")
+    return schema.model_dump()
+
+
+@app.post("/api/action/start", response_model=ActionStartResponse)
+async def start_action(request: ActionStartRequest):
+    """
+    Start a new action flow.
+    Initializes the field collection state for the session.
+    """
+    # Get the action schema
+    schema = get_action_schema(request.action)
+    if not schema:
+        raise HTTPException(404, f"Action '{request.action}' not found")
+    
+    # Start field collection
+    required_fields = [f.name for f in schema.required_fields]
+    state = action_state_manager.start_action(
+        request.session_id, 
+        request.action, 
+        required_fields,
+        request.city
+    )
+    
+    # Update with any initial fields provided
+    for field_name, value in request.initial_fields.items():
+        action_state_manager.update_field(request.session_id, field_name, value)
+    
+    # Refresh state after updates
+    state = action_state_manager.get_state(request.session_id)
+    
+    # Generate prompt for missing fields
+    prompt = field_collector._generate_prompt(state)
+    
+    return ActionStartResponse(
+        status="started",
+        session_id=request.session_id,
+        action=request.action,
+        required_fields=required_fields,
+        missing_fields=state.missing_fields,
+        prompt=prompt,
+        state=state.state
+    )
+
+
+@app.post("/api/action/collect", response_model=ActionCollectResponse)
+async def collect_fields(request: ActionCollectRequest):
+    """
+    Process user response and extract field values.
+    Continues field collection until all required fields are gathered.
+    """
+    result = field_collector.process_response(request.session_id, request.message)
+    
+    state = action_state_manager.get_state(request.session_id)
+    
+    if not state:
+        raise HTTPException(400, "No active action for this session")
+    
+    return ActionCollectResponse(
+        status=result.get("status", "collecting"),
+        session_id=request.session_id,
+        action=state.action,
+        collected_fields=state.fields,
+        missing_fields=state.missing_fields,
+        prompt=result.get("prompt") or "",
+        is_complete=result.get("is_complete", False),
+        state=state.state
+    )
+
+
+@app.post("/api/action/confirm", response_model=ActionConfirmResponse)
+async def confirm_action(request: ActionConfirmRequest):
+    """
+    Confirm or cancel an action.
+    If confirmed, returns the fields ready for execution.
+    """
+    result = field_collector.confirm(request.session_id, request.confirmed)
+    
+    if request.confirmed:
+        state = action_state_manager.get_state(request.session_id)
+        return ActionConfirmResponse(
+            status="confirmed",
+            message="Action confirmed. Ready to execute.",
+            ready_to_execute=True,
+            action=state.action if state else None,
+            fields=state.fields if state else {}
+        )
+    else:
+        return ActionConfirmResponse(
+            status="cancelled",
+            message=result.get("message", "Action cancelled"),
+            ready_to_execute=False
+        )
+
+
+@app.get("/api/action/status/{session_id}", response_model=ActionStatusResponse)
+async def get_action_status(session_id: str):
+    """Get the current status of an action for a session"""
+    status = field_collector.get_status(session_id)
+    
+    if not status:
+        raise HTTPException(404, "No active action for this session")
+    
+    return ActionStatusResponse(
+        status=status.get("state", "unknown"),
+        session_id=session_id,
+        action=status.get("action", ""),
+        state=status.get("state", ""),
+        collected_fields=status.get("fields", {}),
+        missing_fields=status.get("missing_fields", [])
+    )
+
+
+@app.delete("/api/action/{session_id}")
+async def cancel_action(session_id: str):
+    """Cancel an active action"""
+    cleared = action_state_manager.clear_state(session_id)
+    if not cleared:
+        raise HTTPException(404, "No active action to cancel")
+    return {"status": "cancelled", "session_id": session_id}
 
 
 @app.post("/api/chat", response_model=ChatResponse)

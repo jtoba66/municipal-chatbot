@@ -1894,15 +1894,34 @@ async def collect_fields(request: ActionCollectRequest):
 async def confirm_action(request: ActionConfirmRequest):
     """
     Confirm or cancel an action.
-    If confirmed, returns the fields ready for execution.
+    If confirmed, returns the fields ready for execution and sets state to completed with portal URL.
     """
+    from actions import get_portal_info
+    
     result = field_collector.confirm(request.session_id, request.confirmed)
     
     if request.confirmed:
         state = action_state_manager.get_state(request.session_id)
+        
+        # Get portal info for the action
+        portal_info = get_portal_info(state.action) if state else None
+        
+        # Set state to completed
+        if state:
+            action_state_manager.set_state(request.session_id, "completed")
+        
+        # Build response message with portal URL
+        if portal_info:
+            if portal_info.get("execution_type") == "deep_link":
+                message = f"Action confirmed. Click here to complete: {portal_info['portal_url']}"
+            else:
+                message = "Action confirmed. Submitting your request..."
+        else:
+            message = "Action confirmed. Ready to execute."
+        
         return ActionConfirmResponse(
             status="confirmed",
-            message="Action confirmed. Ready to execute.",
+            message=message,
             ready_to_execute=True,
             action=state.action if state else None,
             fields=state.fields if state else {}
@@ -1940,6 +1959,48 @@ async def cancel_action(session_id: str):
     if not cleared:
         raise HTTPException(404, "No active action to cancel")
     return {"status": "cancelled", "session_id": session_id}
+
+
+@app.get("/api/action/result/{session_id}")
+async def get_action_result(session_id: str):
+    """
+    Get action execution result for a session.
+    Returns portal URL, execution type, collected fields, and status message.
+    """
+    from actions import get_portal_info
+    
+    # Get the action state
+    state = action_state_manager.get_state(session_id)
+    if not state:
+        raise HTTPException(404, "No action found for this session")
+    
+    # Get portal info from registry
+    portal_info = get_portal_info(state.action)
+    
+    # Determine the response message based on state and execution type
+    if state.state == "completed":
+        if portal_info and portal_info.get("execution_type") == "deep_link":
+            message = f"Click here to complete: {portal_info['portal_url']}"
+        else:
+            message = "Your request has been submitted successfully."
+    elif state.state == "executing":
+        if portal_info and portal_info.get("execution_type") == "automation":
+            message = "Submitting your request..."
+        else:
+            message = "Preparing your request..."
+    else:
+        message = "Action in progress..."
+    
+    return {
+        "session_id": session_id,
+        "action": state.action,
+        "state": state.state,
+        "portal_url": portal_info.get("portal_url") if portal_info else None,
+        "execution_type": portal_info.get("execution_type") if portal_info else None,
+        "collected_fields": state.fields,
+        "confirmation_number": state.confirmation_number,
+        "message": message
+    }
 
 
 @app.post("/api/chat", response_model=ChatResponse)

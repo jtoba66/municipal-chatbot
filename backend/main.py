@@ -1828,14 +1828,39 @@ async def get_action_schema_endpoint(action: str):
 async def start_action(request: ActionStartRequest):
     """
     Start a new action flow.
-    Initializes the field collection state for the session.
+    For deep_link actions: immediately return portal URL and info needed.
+    For automation actions: collect fields normally.
     """
     # Get the action schema
     schema = get_action_schema(request.action)
     if not schema:
         raise HTTPException(404, f"Action '{request.action}' not found")
     
-    # Start field collection
+    # Check execution type
+    from actions import get_portal_info
+    portal_info = get_portal_info(request.action)
+    is_deep_link = portal_info and portal_info.get("execution_type") == "deep_link"
+    
+    # For deep_link actions: skip field collection, return portal URL + info needed
+    if is_deep_link:
+        required_fields = [{"name": f.name, "label": f.label} for f in schema.required_fields]
+        portal_url = portal_info.get("portal_url", "")
+        
+        # Build message telling user what they'll need
+        fields_needed = ", ".join([f["label"] for f in required_fields])
+        prompt = f"You can complete this here: {portal_url}\n\nYou'll need: {fields_needed}"
+        
+        return ActionStartResponse(
+            status="deep_link",
+            session_id=request.session_id,
+            action=request.action,
+            required_fields=[f["name"] for f in required_fields],
+            missing_fields=[],
+            prompt=prompt,
+            state="completed"
+        )
+    
+    # For automation actions: collect fields as normal
     required_fields = [f.name for f in schema.required_fields]
     state = action_state_manager.start_action(
         request.session_id, 

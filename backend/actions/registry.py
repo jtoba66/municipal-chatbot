@@ -308,7 +308,7 @@ ACTION_SCHEMAS: Dict[str, ActionSchema] = {
         ],
         optional_fields=[],
         portal_url="https://forms.waterloo.ca/Website/Report-an-issue",
-        execution_type="automation",
+        execution_type="deep_link",
         automation_script="waterloo/report_issue.py"
     )
 }

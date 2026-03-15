@@ -2,7 +2,7 @@
 Action Registry
 Maps action names to handler modules and field schemas
 """
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 from .base import ActionSchema, ActionBase
 
 
@@ -24,6 +24,7 @@ ACTION_SCHEMAS: Dict[str, ActionSchema] = {
         ],
         optional_fields=[],
         portal_url="https://portal.gtechna.com/userportal/kitchener/ticketSearch1.xhtml",
+        execution_type="deep_link",
         automation_script="kitchener/pay_ticket.py"
     ),
     "pay_ticket_waterloo": ActionSchema(
@@ -50,6 +51,7 @@ ACTION_SCHEMAS: Dict[str, ActionSchema] = {
         ],
         optional_fields=[],
         portal_url="https://amps.waterloo.ca/pay",
+        execution_type="deep_link",
         automation_script="waterloo/pay_ticket.py"
     ),
     "report_issue": ActionSchema(
@@ -114,6 +116,7 @@ ACTION_SCHEMAS: Dict[str, ActionSchema] = {
             }
         ],
         portal_url="https://form.kitchener.ca/CSD/CCS/Report-a-problem",
+        execution_type="automation",
         automation_script="kitchener/report_issue.py"
     ),
     "book_parking_permit": ActionSchema(
@@ -168,6 +171,7 @@ ACTION_SCHEMAS: Dict[str, ActionSchema] = {
         ],
         optional_fields=[],
         portal_url="https://kitchener.parkingpermit.site/signup",
+        execution_type="automation",
         automation_script="kitchener/book_parking_permit.py"
     ),
     "check_permit_status": ActionSchema(
@@ -192,6 +196,7 @@ ACTION_SCHEMAS: Dict[str, ActionSchema] = {
         ],
         optional_fields=[],
         portal_url="https://onlineserviceportal2.kitchener.ca/citizenportal/app/landing",
+        execution_type="deep_link",
         automation_script="kitchener/check_permit_status.py"
     ),
     "schedule_inspection": ActionSchema(
@@ -238,7 +243,73 @@ ACTION_SCHEMAS: Dict[str, ActionSchema] = {
         ],
         optional_fields=[],
         portal_url="https://onlineserviceportal2.kitchener.ca/citizenportal/app/landing",
+        execution_type="automation",
         automation_script="kitchener/schedule_inspection.py"
+    ),
+    "report_issue_waterloo": ActionSchema(
+        action="report_issue_waterloo",
+        city="waterloo",
+        description="Report a municipal issue in Waterloo (pothole, graffiti, etc.)",
+        required_fields=[
+            {
+                "name": "category",
+                "type": "select",
+                "label": "Category",
+                "required": True,
+                "options": [
+                    "Broken/Defaced Sign", "Cemetery", "Crosswalk/Road Marking",
+                    "Dead Animal", "Finance", "Graffiti", "Litter/Debris",
+                    "Noise Complaint", "Parks & Recreation", "Pothole/Road Repair",
+                    "Sidewalk/Curb", "Signal Light", "Street Light", "Traffic Sign",
+                    "Tree/Brush", "Other"
+                ]
+            },
+            {
+                "name": "location",
+                "type": "text",
+                "label": "Location",
+                "required": True,
+                "placeholder": "Street address or cross streets"
+            },
+            {
+                "name": "description",
+                "type": "textarea",
+                "label": "Description",
+                "required": True,
+                "max_length": 500,
+                "placeholder": "Describe the issue in detail"
+            },
+            {
+                "name": "first_name",
+                "type": "text",
+                "label": "First Name",
+                "required": True
+            },
+            {
+                "name": "last_name",
+                "type": "text",
+                "label": "Last Name",
+                "required": True
+            },
+            {
+                "name": "email",
+                "type": "email",
+                "label": "Email Address",
+                "required": True,
+                "validation": r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+            },
+            {
+                "name": "phone",
+                "type": "phone",
+                "label": "Phone Number",
+                "required": False,
+                "validation": r"^\d{3}-\d{3}-\d{4}$"
+            }
+        ],
+        optional_fields=[],
+        portal_url="https://forms.waterloo.ca/Website/Report-an-issue",
+        execution_type="automation",
+        automation_script="waterloo/report_issue.py"
     )
 }
 
@@ -267,6 +338,58 @@ def get_handler(action_name: str) -> Optional[type]:
     return ACTION_HANDLERS.get(action_name)
 
 
+def get_portal_info(action_name: str) -> Optional[dict]:
+    """
+    Get the portal URL and execution type for an action.
+    
+    Returns:
+        dict with keys:
+            - portal_url: str - The URL to the portal
+            - execution_type: str - "deep_link" or "automation"
+            - automation_script: Optional[str] - Path to automation script if applicable
+    """
+    schema = ACTION_SCHEMAS.get(action_name)
+    if not schema:
+        return None
+    
+    return {
+        "portal_url": schema.portal_url,
+        "execution_type": schema.execution_type,
+        "automation_script": schema.automation_script
+    }
+
+
+def get_deep_link_url(action_name: str, fields: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Generate a deep link URL with optional query parameters.
+    
+    Args:
+        action_name: The action to get URL for
+        fields: Optional dict of field values to encode in URL
+        
+    Returns:
+        Portal URL with query params if applicable
+    """
+    schema = ACTION_SCHEMAS.get(action_name)
+    if not schema:
+        return ""
+    
+    portal_url = schema.portal_url
+    
+    if fields:
+        # Add common fields as query params where they might be useful
+        params = []
+        for key in ["ticket_number", "license_plate", "penalty_number", "search_value", "permit_number"]:
+            if key in fields and fields[key]:
+                params.append(f"{key}={fields[key]}")
+        
+        if params:
+            separator = "&" if "?" in portal_url else "?"
+            portal_url = f"{portal_url}{separator}{'&'.join(params)}"
+    
+    return portal_url
+
+
 # Registry for external access
 ACTION_REGISTRY = {
     "schemas": ACTION_SCHEMAS,
@@ -274,5 +397,7 @@ ACTION_REGISTRY = {
     "register": register_action_handler,
     "get_schema": get_action_schema,
     "get_all": get_all_actions,
-    "get_handler": get_handler
+    "get_handler": get_handler,
+    "get_portal_info": get_portal_info,
+    "get_deep_link_url": get_deep_link_url
 }

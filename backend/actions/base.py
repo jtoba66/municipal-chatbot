@@ -27,6 +27,7 @@ class ActionSchema(BaseModel):
     required_fields: List[FieldDefinition]
     optional_fields: List[FieldDefinition] = []
     portal_url: str
+    execution_type: str = "deep_link"  # "deep_link" or "automation"
     automation_script: Optional[str] = None
 
 

@@ -116,7 +116,7 @@ ACTION_SCHEMAS: Dict[str, ActionSchema] = {
             }
         ],
         portal_url="https://form.kitchener.ca/CSD/CCS/Report-a-problem",
-        execution_type="automation",
+        execution_type="deep_link",
         automation_script="kitchener/report_issue.py"
     ),
     "book_parking_permit": ActionSchema(
@@ -243,7 +243,7 @@ ACTION_SCHEMAS: Dict[str, ActionSchema] = {
         ],
         optional_fields=[],
         portal_url="https://onlineserviceportal2.kitchener.ca/citizenportal/app/landing",
-        execution_type="automation",
+        execution_type="deep_link",
         automation_script="kitchener/schedule_inspection.py"
     ),
     "report_issue_waterloo": ActionSchema(
